@@ -1,10 +1,11 @@
 use crate::staging_buffer::StagingBuffer;
 use lazy_static::lazy_static;
+use log::Log;
 use std::sync::{Arc, Mutex};
 
 lazy_static! {
-    pub static ref LOGGER: Arc<Logger> = {
-        let logger = Arc::new(Logger::new());
+    static ref LOGGER_INTERNAL: Arc<LoggerInternal> = {
+        let logger = Arc::new(LoggerInternal::new());
 
         let logger_cloned = logger.clone();
         std::thread::spawn(move || {
@@ -18,18 +19,18 @@ lazy_static! {
 thread_local! {
     pub static STAGING_BUFFER: Arc<StagingBuffer> = {
         let staging_buffer = Arc::new(StagingBuffer::new(std::thread::current().id()));
-        LOGGER.append_log_buffer(staging_buffer.clone());
+        LOGGER_INTERNAL.append_log_buffer(staging_buffer.clone());
         staging_buffer
     };
 }
 
-pub struct Logger {
+struct LoggerInternal {
     thread_buffer: Mutex<Vec<Arc<StagingBuffer>>>,
 }
 
-impl Logger {
+impl LoggerInternal {
     pub fn new() -> Self {
-        Logger {
+        LoggerInternal {
             thread_buffer: Mutex::new(vec![]),
         }
     }
@@ -70,7 +71,7 @@ impl Logger {
                         let slice = std::slice::from_raw_parts(raw_ptr, peek_bytes);
                         match std::str::from_utf8(slice) {
                             Ok(s) => println!("{}", s),
-                            Err(_) => println!("Invalid UTF-8 data"),
+                            Err(_) => println!("Invalid data"),
                         }
                     }
                     staging_buffer.consume(peek_bytes);
@@ -90,4 +91,26 @@ impl Logger {
             // TODO: Log File IO
         }
     }
+}
+
+pub struct Logger;
+
+impl Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let string = record.args().to_string();
+            let pos = LOGGER_INTERNAL.reserve_alloc(string.len());
+            let storage = LOGGER_INTERNAL.get_storage();
+            unsafe {
+                std::ptr::copy_nonoverlapping(string.as_ptr(), storage.add(pos), string.len());
+            }
+            LOGGER_INTERNAL.finish_alloc(string.len());
+        }
+    }
+
+    fn flush(&self) {}
 }

@@ -8,11 +8,14 @@ const CACHE_LINE_SIZE: usize = 64;
 pub struct StagingBuffer {
     storage: UnsafeCell<Box<[u8; STAGING_BUFFER_MAX_SIZE]>>,
 
+    // alignas buffer
+    _cache_line_buffer_consumer: [u8; 2 * CACHE_LINE_SIZE],
+
     // consumer use
     consumer_pos: AtomicUsize,
 
     // alignas buffer
-    _cache_line_buffer: [u8; 2 * CACHE_LINE_SIZE],
+    _cache_line_buffer_producer: [u8; 2 * CACHE_LINE_SIZE],
 
     // producer use
     producer_pos: AtomicUsize,
@@ -30,9 +33,11 @@ impl StagingBuffer {
         StagingBuffer {
             storage: UnsafeCell::new(Box::new([0; STAGING_BUFFER_MAX_SIZE])),
 
+            _cache_line_buffer_consumer: [0; 2 * CACHE_LINE_SIZE],
+
             consumer_pos: AtomicUsize::new(0),
 
-            _cache_line_buffer: [0; 2 * CACHE_LINE_SIZE],
+            _cache_line_buffer_producer: [0; 2 * CACHE_LINE_SIZE],
 
             producer_pos: AtomicUsize::new(0),
             end_of_recorded_space: AtomicUsize::new(STAGING_BUFFER_MAX_SIZE),
@@ -92,7 +97,7 @@ impl StagingBuffer {
     pub fn finish_reservation(&self, n_bytes: usize) {
         //TODO: sfence
         self.min_free_space.set(self.min_free_space.get() - n_bytes);
-        self.producer_pos.fetch_add(n_bytes, Ordering::Relaxed);
+        self.producer_pos.fetch_add(n_bytes, Ordering::Release);
     }
 
     #[inline]
@@ -106,11 +111,11 @@ impl StagingBuffer {
 
         if cached_producer_pos < self.consumer_pos.load(Ordering::Relaxed) {
             //TODO: lfence
-            let byte_available = self.end_of_recorded_space.load(Ordering::Relaxed)
-                - self.consumer_pos.load(Ordering::Relaxed);
+            let byte_available = self.end_of_recorded_space.load(Ordering::Relaxed) as i64
+                - self.consumer_pos.load(Ordering::Relaxed) as i64;
 
             if byte_available > 0 {
-                return (self.consumer_pos.load(Ordering::Relaxed), byte_available);
+                return (self.consumer_pos.load(Ordering::Relaxed), byte_available as usize);
             }
 
             self.consumer_pos.store(0, Ordering::Relaxed);

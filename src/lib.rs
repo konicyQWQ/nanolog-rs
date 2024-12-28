@@ -1,24 +1,20 @@
-pub mod runtime;
+mod runtime;
 mod staging_buffer;
+
+pub static LOGGER: runtime::Logger = runtime::Logger;
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Add;
+    use crate::LOGGER;
+    use log::{info, Log};
     use std::thread::sleep;
     use std::time::Duration;
-    use crate::runtime::LOGGER;
 
     #[test]
     fn log_output() {
-        let string = "1234";
+        log::set_logger(&LOGGER).expect("set logger error");
+        log::set_max_level(log::LevelFilter::Info);
 
-        let pos = LOGGER.reserve_alloc(string.len());
-        let storage = LOGGER.get_storage();
-        unsafe {
-            std::ptr::copy_nonoverlapping(string.as_ptr(), storage.add(pos), string.len());
-        }
-        LOGGER.finish_alloc(string.len());
-
-        sleep(Duration::from_secs(1));
+        info!("hello world");
     }
 }
